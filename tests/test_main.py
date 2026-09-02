@@ -2,6 +2,7 @@ from datetime import date
 
 from fastapi.testclient import TestClient
 
+import fx_client
 import main
 from fx_client import RateFound, RateProblem
 from main import _normalize_currency, _parse_amount, _parse_date, app
@@ -73,6 +74,23 @@ def test_convert_success(monkeypatch):
     assert body["rate_date"] == "2026-08-28"
     assert body["asked_date"] == "2026-08-29"
     assert body["result"] == round(250 * 56.1718, 2)
+
+
+def test_convert_different_amounts_share_the_cached_rate(monkeypatch):
+    calls = []
+
+    async def fake_uncached(base, target, on_date):
+        calls.append(on_date)
+        return RateFound(rate=56.1718, actual_date=on_date)
+
+    monkeypatch.setattr(fx_client, "_fetch_rate_uncached", fake_uncached)
+
+    first = client.get("/tools/convert", params={"amount": "100", "from": "EUR", "to": "TRY", "date": "2026-08-28"})
+    second = client.get("/tools/convert", params={"amount": "9999", "from": "EUR", "to": "TRY", "date": "2026-08-28"})
+
+    assert len(calls) == 1
+    assert first.json()["result"] == round(100 * 56.1718, 2)
+    assert second.json()["result"] == round(9999 * 56.1718, 2)
 
 
 def test_convert_invalid_amount():
