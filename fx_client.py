@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from datetime import date
 
@@ -20,6 +21,14 @@ class RateProblem:
 
 def _upstream_base() -> str:
     return os.environ.get("FX_UPSTREAM_BASE", "https://api.frankfurter.dev").rstrip("/")
+
+
+def _now() -> float:
+    return time.time()
+
+
+_LATEST_TTL_SECONDS = 300
+_cache: dict[tuple[str, str, date | None], tuple[RateFound, float]] = {}
 
 
 def _interpret(status_code: int, payload: dict | None, target: str) -> RateFound | RateProblem:
@@ -44,6 +53,20 @@ def _interpret(status_code: int, payload: dict | None, target: str) -> RateFound
 
 
 async def fetch_rate(base: str, target: str, on_date: date | None) -> RateFound | RateProblem:
+    key = (base, target, on_date)
+    cached = _cache.get(key)
+    if cached is not None:
+        result, cached_at = cached
+        if on_date is not None or _now() - cached_at < _LATEST_TTL_SECONDS:
+            return result
+
+    result = await _fetch_rate_uncached(base, target, on_date)
+    if isinstance(result, RateFound):
+        _cache[key] = (result, _now())
+    return result
+
+
+async def _fetch_rate_uncached(base: str, target: str, on_date: date | None) -> RateFound | RateProblem:
     path = on_date.isoformat() if on_date else "latest"
     url = f"{_upstream_base()}/v1/{path}"
 
